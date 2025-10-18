@@ -1,0 +1,29 @@
+[tool.poetry]
+name = "rag-architecture-workshop"
+version = "0.1.0"
+description = "Scaffold for a workshop exploring Advanced, Graph, and Reflective RAG architectures."
+authors = ["RAG Workshop Maintainers"]
+readme = "README.md"
+packages = [{ include = "app", from = "backend" }]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "0.119.0"
+uvicorn = { version = "0.37.0", extras = ["standard"] }
+pydantic = "2.12.3"
+httpx = "0.28.1"
+langchain = "1.0.0"
+langchain-community = "0.4"
+langchain-ollama = "1.0.0"
+python-dotenv = "1.1.1"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "8.4.2"
+pytest-asyncio = "1.2.0"
+ruff = "0.14.1"
+mypy = "1.18.2"
+
+[build-system]
+requires = ["poetry-core>=1.9.0"]
+build-backend = "poetry.core.masonry.api"
+

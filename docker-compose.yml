@@ -1,0 +1,44 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: infra/docker/backend/Dockerfile
+    restart: unless-stopped
+    environment:
+      - PYTHONPATH=/app/backend
+    volumes:
+      - ./backend:/app/backend:ro
+      - ./data:/app/data:ro
+      - ./outputs:/app/outputs
+    depends_on:
+      ollama:
+        condition: service_started
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build:
+      context: .
+      dockerfile: infra/docker/frontend/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_started
+    ports:
+      - "3000:80"
+
+  ollama:
+    build:
+      context: .
+      dockerfile: infra/docker/ollama/Dockerfile
+    restart: unless-stopped
+    environment:
+      - OLLAMA_MODEL=llama3.1:8b
+    volumes:
+      - ollama-models:/root/.ollama
+    ports:
+      - "11434:11434"
+
+volumes:
+  ollama-models:
+    driver: local
