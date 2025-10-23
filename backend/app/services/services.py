@@ -90,3 +90,13 @@ def embed_documents(filename: str, *, chunk_size: int, overlap: int) -> int:
             handle.write("\n")
 
     return len(embeddings)
+
+
+def build_graph_rag_index(filename: str, *, chunk_size: int, overlap: int) -> None:
+    """Prepare graph-based artifacts for the specified corpus (Graph RAG)."""
+    raise NotImplementedError("Graph RAG index construction not implemented yet.")
+
+
+def graph_rag_query(chat_id: UUID, user_query: str) -> str:
+    """Execute a Graph RAG retrieval + generation workflow."""
+    raise NotImplementedError("Graph RAG query flow not implemented yet.")

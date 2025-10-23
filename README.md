@@ -15,10 +15,10 @@ Each architecture will live on its own branch. The `main` branch contains the ba
  - `app/api/` — REST endpoints shared across workshop branches (e.g., `/api/query`, `/api/embed`).
  - `app/models/` — Pydantic request/response schemas.
  - `app/services/` — Placeholder business logic where each architecture will plug in its pipeline.
- - `app/core/`
+  - `app/core/`
     - `chunking.py` — Utilities to split documents into manageable chunks; includes helpers tuned for the Enron email corpus (e.g., `chunk_email_records`).
-    - `database.py` — Helpers for vector/graph persistence (FAISS, file stores, GraphRAG scaffolds).
-    - `embeddings.py` — Embedding + graph artifact generation scaffolds, with methods to embed dataframe rows or raw text lists via LangChain.
+    - `database.py` — Helpers for vector/graph persistence (FAISS, file stores, GraphRAG scaffolds) including `GraphFileStore` for reading pipeline artifacts.
+    - `embeddings.py` — Embedding + graph artifact generation scaffolds, with methods to embed dataframe rows or raw text lists via LangChain and helper utilities for entity extraction/co-occurrence graphs.
     - `llm.py` — LangChain/Ollama wrapper that records conversations to disk.
     - `history.py` — JSONL conversation logging for post-workshop metrics.
 - `frontend/` — React + Material UI interface with a WhatsApp-style chat and embedding trigger.
@@ -43,8 +43,9 @@ Each architecture will live on its own branch. The `main` branch contains the ba
   - `POST /api/query/{chat_id}` — continues an existing conversation.
   - `POST /api/embed` — ingests documents and triggers chunking/embedding.
 - `app/services/services.py` contains unfinished functions (`start_new_chat`, `continue_chat`, `embed_documents`) that the workshop participants will complete.
-- `app/core/embeddings.py` already provides convenience methods for creating embeddings, extracting simple entities, persisting a graph-shaped artifact to `outputs/advanced_rag/graph`, and generating vectors directly from raw text (via LangChain's Ollama integration).
-- `app/services/services.py` now contains a concrete `embed_documents` implementation that reads `data/corpus/emails.csv`, calls the shared chunking/embedding utilities, and persists embeddings for downstream use.
+- `app/core/embeddings.py` already provides convenience methods for creating embeddings, extracting simple entities, persisting graph artifacts under `outputs/graph_rag`, and generating vectors directly from raw text (via LangChain's Ollama integration).
+- `app/services/services.py` now contains a concrete `embed_documents` implementation that reads `data/corpus/emails.csv`, calls the shared chunking/embedding utilities, and persists embeddings for downstream use. It also exposes Graph RAG-specific stubs (`build_graph_rag_index`, `graph_rag_query`) that workshop participants will implement.
+- `app/core/database.py` exposes both `FaissVectorStore` and `GraphFileStore`, enabling you to read GraphRAG pipeline artifacts directly from the filesystem.
 - `app/core/history.py` shows how chats are persisted so you can reuse transcripts after implementing retrieval.
 
 ## Advanced RAG Challenge Guidance
@@ -68,6 +69,23 @@ The goal is to transform the baseline endpoints into a full retrieval-augmented 
    - You might add lightweight instrumentation (timings, retrieved chunk IDs) to better understand retrieval quality during the workshop.
 
 Treat the above as a checklist rather than a prescription. The workshop is designed to provoke experimentation—adapt chunking strategies, improve prompt wording, or bolt on re-ranking as you see fit. The only constraint: keep everything runnable locally via the provided Docker/Vite setup so the audience can iterate quickly.
+
+## Graph RAG Challenge Guidance
+
+When you switch to the Graph RAG branch, build upon the new scaffolding:
+
+1. **Graph Construction**
+   - Use `EmbeddingGenerator.extract_entities` and `EmbeddingGenerator.build_graph` to emit co-occurrence nodes/edges for the Enron corpus.
+   - Extend or replace the heuristics with GraphRAG’s extraction pipelines (e.g., claim/relationship extraction) and persist results using the same directory structure.
+2. **Graph Storage & Inspection**
+   - Leverage `GraphFileStore.query_graph_file` to read GraphRAG-compatible artifacts (JSON/JSONL) from disk. This mirrors the default file-based pipeline storage.
+3. **Service Layer Stubs**
+   - Implement `build_graph_rag_index` to orchestrate extraction, graph persistence, and optional summarisation ahead of query time.
+   - Implement `graph_rag_query` to combine graph traversal (communities, relationship hops, claim summaries) with language model prompting.
+4. **Prompting & Evaluation**
+   - Compare graph-enriched answers with the Advanced RAG baseline. Capture which nodes/edges were used and how they influence responses.
+
+Document your choices so participants can appreciate the trade-offs between vector-only and graph-aware retrieval.
 
 ## REST Examples
 

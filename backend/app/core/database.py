@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import json
 import os
+import asyncio
+from pathlib import Path
 from typing import Iterable, List, Optional, Tuple
 
 import numpy as np
+from graphrag.storage.file_pipeline_storage import FilePipelineStorage
 
 
 class FaissVectorStore:
@@ -139,3 +142,62 @@ class FaissVectorStore:
                 json.dump(self._document_ids, file)
         except Exception:  # noqa: BLE001 - persistence failures should not crash callers
             pass
+class GraphFileStore:
+    """File-backed graph store compatible with GraphRAG defaults."""
+
+    def __init__(self, base_dir: str | Path = "outputs/graph_rag") -> None:
+        self.base_dir = Path(base_dir)
+        self.storage = FilePipelineStorage(base_dir=str(self.base_dir), encoding="utf-8")
+
+    async def _get_async(
+        self,
+        key: str,
+        *,
+        as_bytes: bool = False,
+        encoding: Optional[str] = None,
+    ) -> str | bytes:
+        data = await self.storage.get(key, as_bytes=as_bytes, encoding=encoding)
+        if data is None:
+            raise FileNotFoundError(
+                f"Graph artifact '{key}' not found under {self.base_dir}."
+            )
+        return data
+
+    def query_graph_file(
+        self,
+        key: str,
+        *,
+        parse_json: bool = True,
+    ) -> list | dict | str | bytes:
+        async def loader() -> str | bytes:
+            return await self._get_async(key)
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            payload = asyncio.run(loader())
+        else:
+            payload = loop.run_until_complete(loader())
+
+        if not parse_json:
+            return payload
+
+        if isinstance(payload, bytes):
+            payload_text = payload.decode("utf-8")
+        else:
+            payload_text = payload
+
+        payload_text = payload_text.strip()
+        if not payload_text:
+            return []
+
+        try:
+            return json.loads(payload_text)
+        except json.JSONDecodeError:
+            records = []
+            for line in payload_text.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                records.append(json.loads(line))
+            return records

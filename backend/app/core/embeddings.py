@@ -1,7 +1,11 @@
-"""Embedding generation utilities for Advanced RAG."""
+"""Embedding and entity extraction utilities for RAG workflows."""
 
 from __future__ import annotations
 
+import json
+import re
+from collections import Counter, defaultdict
+from pathlib import Path
 from typing import Iterable, List, Optional, Tuple, TYPE_CHECKING
 
 from langchain_core.embeddings import Embeddings
@@ -121,3 +125,83 @@ class EmbeddingGenerator:
             raise RuntimeError("Embedding model returned unexpected number of vectors.")
 
         return list(zip(ids, embeddings))
+
+    def extract_entities(self, text: str) -> List[str]:
+        """Extract entities (people, orgs, emails) using simple heuristics."""
+        email_pattern = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+        capitalised_pattern = re.compile(r"\b[A-Z][a-zA-Z]{2,}\b")
+
+        candidates = email_pattern.findall(text)
+        candidates.extend(capitalised_pattern.findall(text))
+
+        seen: set[str] = set()
+        unique_entities: List[str] = []
+        for candidate in candidates:
+            key = candidate.lower()
+            if key not in seen:
+                seen.add(key)
+                unique_entities.append(candidate)
+        return unique_entities
+
+    def build_graph(
+        self,
+        dataframe: "pl.DataFrame",
+        *,
+        output_dir: str | Path = "outputs/graph_rag",
+    ) -> dict[str, int]:
+        """
+        Build a lightweight co-occurrence graph from a dataframe of emails.
+
+        Returns a summary dictionary containing the number of nodes and edges.
+        """
+        try:
+            import polars as pl
+        except ImportError as exc:  # pragma: no cover
+            raise RuntimeError("polars is required to build graph artifacts.") from exc
+
+        if not isinstance(dataframe, pl.DataFrame):
+            raise TypeError("Expected a polars.DataFrame when building the graph.")
+
+        if not {"file", "message"}.issubset(dataframe.columns):
+            raise ValueError("DataFrame must contain 'file' and 'message' columns.")
+
+        node_frequency: Counter[str] = Counter()
+        edges: defaultdict[tuple[str, str], int] = defaultdict(int)
+
+        for row in dataframe.iter_rows(named=True):
+            entities = self.extract_entities(row["message"] or "")
+            if not entities:
+                continue
+            node_frequency.update(entities)
+            for i, source in enumerate(entities):
+                for target in entities[i + 1 :]:
+                    edge = tuple(sorted((source, target)))
+                    edges[edge] += 1
+
+        graph_path = Path(output_dir)
+        graph_path.mkdir(parents=True, exist_ok=True)
+
+        nodes_file = graph_path / "nodes.jsonl"
+        edges_file = graph_path / "edges.jsonl"
+
+        with nodes_file.open("w", encoding="utf-8") as nf:
+            for entity, freq in node_frequency.items():
+                nf.write(
+                    json.dumps({"id": entity, "label": entity, "frequency": freq})
+                )
+                nf.write("\n")
+
+        with edges_file.open("w", encoding="utf-8") as ef:
+            for (source, target), weight in edges.items():
+                ef.write(
+                    json.dumps(
+                        {
+                            "source": source,
+                            "target": target,
+                            "weight": weight,
+                        }
+                    )
+                )
+                ef.write("\n")
+
+        return {"nodes": len(node_frequency), "edges": len(edges)}
