@@ -6,7 +6,6 @@ services:
     restart: unless-stopped
     environment:
       - PYTHONPATH=/app/backend
-      - OLLAMA_BASE_URL=http://ollama:12434
     volumes:
       - ./backend:/app/backend:ro
       - ./data:/app/data:ro
@@ -35,12 +34,10 @@ services:
     restart: unless-stopped
     environment:
       - OLLAMA_MODEL=llama3.1:8b
-      - OLLAMA_HOST=0.0.0.0
-      - OLLAMA_PORT=12434
     volumes:
       - ollama-models:/root/.ollama
     ports:
-      - "12434:12434"
+      - "11434:11434"
 
 volumes:
   ollama-models:

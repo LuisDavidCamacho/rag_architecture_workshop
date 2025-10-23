@@ -3,12 +3,12 @@ FROM node:20-slim AS builder
 
 WORKDIR /app
 
-# Install dependencies using npm (pnpm/yarn fallbacks not required for this workshop).
-COPY frontend/package.json ./
-RUN npm install --silent
+# Install dependencies based on the eventual package manifest (to be added later).
+COPY frontend/package.json frontend/package-lock.json* frontend/pnpm-lock.yaml* frontend/yarn.lock* ./ 
+RUN npm install --silent || pnpm install || yarn install
 
 COPY frontend/ .
-RUN npm run build
+RUN npm run build || pnpm run build || yarn build
 
 # Stage 2: Serve the compiled assets via a minimal web server
 FROM nginx:1.27-alpine AS runner
