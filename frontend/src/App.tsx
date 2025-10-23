@@ -1,14 +1,14 @@
 import { CssBaseline, ThemeProvider } from "@mui/material";
 import React from "react";
-import { WorkshopShell } from "./components/WorkshopShell";
+
+import { ChatPage } from "./pages/ChatPage";
 import { workshopTheme } from "./theme";
 
 export function App(): React.ReactElement {
   return (
     <ThemeProvider theme={workshopTheme}>
       <CssBaseline />
-      <WorkshopShell />
+      <ChatPage />
     </ThemeProvider>
   );
 }
-
