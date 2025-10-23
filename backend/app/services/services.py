@@ -29,6 +29,31 @@ def continue_chat(chat_id: UUID, user_query: str) -> str:
     raise NotImplementedError("Advanced RAG continue_chat service not implemented.")
 
 
+def draft_reflective_response(chat_id: UUID, user_query: str) -> str:
+    """Generate an initial draft answer for the reflective RAG loop."""
+    raise NotImplementedError("Reflective RAG draft agent not implemented yet.")
+
+
+def critique_response(chat_id: UUID, draft_response: str, user_query: str) -> str:
+    """Produce a self-critique or reviewer style analysis of the draft answer."""
+    raise NotImplementedError("Reflective RAG critique agent not implemented yet.")
+
+
+def apply_reflection(
+    chat_id: UUID,
+    user_query: str,
+    draft_response: str,
+    critique_notes: str,
+) -> str:
+    """Revise the draft answer according to critique notes and return the final reply."""
+    raise NotImplementedError("Reflective RAG revision agent not implemented yet.")
+
+
+def reflective_cycle(chat_id: UUID, user_query: str) -> Tuple[str, str, str]:
+    """Run the full reflective cycle returning draft, critique, and final response."""
+    raise NotImplementedError("Reflective RAG control loop not implemented yet.")
+
+
 def embed_documents(filename: str, *, chunk_size: int, overlap: int) -> int:
     """
     Generate embeddings for the specified CSV corpus located under data/corpus.

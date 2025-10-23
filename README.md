@@ -42,9 +42,9 @@ Each architecture will live on its own branch. The `main` branch contains the ba
   - `POST /api/query` — creates a new chat session and returns `chat_id` + model reply.
   - `POST /api/query/{chat_id}` — continues an existing conversation.
   - `POST /api/embed` — ingests documents and triggers chunking/embedding.
-- `app/services/services.py` contains unfinished functions (`start_new_chat`, `continue_chat`, `embed_documents`) that the workshop participants will complete.
-- `app/core/embeddings.py` already provides convenience methods for creating embeddings, extracting simple entities, persisting a graph-shaped artifact to `outputs/advanced_rag/graph`, and generating vectors directly from raw text (via LangChain's Ollama integration).
-- `app/services/services.py` now contains a concrete `embed_documents` implementation that reads `data/corpus/emails.csv`, calls the shared chunking/embedding utilities, and persists embeddings for downstream use.
+- `app/services/services.py` contains unfinished functions (`start_new_chat`, `continue_chat`, `embed_documents`, plus reflective/graph RAG stubs) that the workshop participants will complete.
+- `app/core/embeddings.py` already provides convenience methods for creating embeddings, extracting simple entities, persisting graph artifacts under `outputs/graph_rag`, and generating vectors directly from raw text (via LangChain's Ollama integration).
+- `app/services/services.py` now contains a concrete `embed_documents` implementation that reads `data/corpus/emails.csv`, calls the shared chunking/embedding utilities, and persists embeddings for downstream use. It also exposes Graph RAG stubs (`build_graph_rag_index`, `graph_rag_query`) and Reflective RAG agents (`draft_reflective_response`, `critique_response`, `apply_reflection`, `reflective_cycle`).
 - `app/core/history.py` shows how chats are persisted so you can reuse transcripts after implementing retrieval.
 
 ## Advanced RAG Challenge Guidance
@@ -68,6 +68,21 @@ The goal is to transform the baseline endpoints into a full retrieval-augmented 
    - You might add lightweight instrumentation (timings, retrieved chunk IDs) to better understand retrieval quality during the workshop.
 
 Treat the above as a checklist rather than a prescription. The workshop is designed to provoke experimentation—adapt chunking strategies, improve prompt wording, or bolt on re-ranking as you see fit. The only constraint: keep everything runnable locally via the provided Docker/Vite setup so the audience can iterate quickly.
+
+## Reflective RAG Challenge Guidance
+
+Once you are comfortable with Advanced RAG, layer in a reflection loop:
+
+1. **Draft Agent** – Implement `draft_reflective_response` to produce the first answer. Reuse the same retrieval utilities but capture rationale that can be critiqued later.
+2. **Critique Agent** – Use `critique_response` to analyse the draft (accuracy, missing evidence, tone). Keep the critique structured so it is easy for the revision step to consume.
+3. **Revision Agent** – Implement `apply_reflection` to merge critique feedback into a refined answer. Decide whether to recompute retrieval results or simply adjust the drafted text.
+4. **Controller** – Wire everything together in `reflective_cycle`, optionally iterating multiple times. Log draft/critique/final triples via `ConversationStore` so you can inspect improvements.
+
+Hints:
+
+- Reflection augments retrieval rather than replaces it—continue to use the embeddings and, if relevant, graph artifacts prepared earlier.
+- Consider exposing critique notes back to the frontend or exporting them for evaluation; a transparent reflection trail helps compare reflective vs. non-reflective outputs.
+- Pay attention to stopping criteria (confidence scores, critique severity). A noisy critique may do more harm than good, so experiment with thresholds.
 
 ## REST Examples
 
