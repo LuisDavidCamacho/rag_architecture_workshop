@@ -167,7 +167,7 @@ class LLMChatAgent:
 
 def _default_ollama_url() -> str:
     host = os.getenv("OLLAMA_HOST", "ollama")
-    port = os.getenv("OLLAMA_PORT", "12434")
+    port = os.getenv("OLLAMA_PORT", "11434")
     # Some setups specify host with host:port. Respect it if present.
     if ":" in host:
         return f"http://{host}"

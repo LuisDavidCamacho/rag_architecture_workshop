@@ -6,13 +6,14 @@ services:
     restart: unless-stopped
     environment:
       - PYTHONPATH=/app/backend
+      - OLLAMA_BASE_URL=http://ollama:11434
     volumes:
       - ./backend:/app/backend:ro
       - ./data:/app/data:ro
       - ./outputs:/app/outputs
     depends_on:
       ollama:
-        condition: service_started
+        condition: service_healthy
     ports:
       - "8000:8000"
 
@@ -38,6 +39,12 @@ services:
       - ollama-models:/root/.ollama
     ports:
       - "12434:11434"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/version"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
 
 volumes:
   ollama-models:
