@@ -8,6 +8,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Iterable, List, Optional, Tuple, TYPE_CHECKING
 
+import os
 from langchain_core.embeddings import Embeddings
 
 if TYPE_CHECKING:
@@ -30,11 +31,13 @@ class EmbeddingGenerator:
         id_column: str = "id",
         text_column: str = "text",
         embedder: Optional[Embeddings] = None,
+        base_url: Optional[str] = None,
     ) -> None:
         self.model_name = model_name
         self.id_column = id_column
         self.text_column = text_column
         self._embedder: Optional[Embeddings] = embedder
+        self._base_url = base_url or os.getenv("OLLAMA_BASE_URL")
 
     def generate(self, dataframe: "pl.DataFrame") -> List[Tuple[str, List[float]]]:
         """
@@ -82,7 +85,10 @@ class EmbeddingGenerator:
                     "embeddings using Ollama."
                 ) from exc
 
-            self._embedder = OllamaEmbeddings(model=self.model_name)
+            self._embedder = OllamaEmbeddings(
+                model=self.model_name,
+                base_url=self._base_url,
+            )
 
         embeddings = self._embedder.embed_documents(documents)
 
@@ -118,7 +124,10 @@ class EmbeddingGenerator:
                     "langchain-ollama is not installed. Add it via Poetry to generate embeddings."
                 ) from exc
 
-            self._embedder = OllamaEmbeddings(model=self.model_name)
+            self._embedder = OllamaEmbeddings(
+                model=self.model_name,
+                base_url=self._base_url,
+            )
 
         embeddings = self._embedder.embed_documents(docs)
         if len(embeddings) != len(ids):
