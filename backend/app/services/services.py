@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
-from typing import Dict, List, Tuple
-from uuid import UUID
+from typing import Dict, List, Sequence, Tuple
+from uuid import UUID, uuid4
 
-from ..core import EmbeddingGenerator
+import numpy as np
+
+from ..core import EmbeddingGenerator, GraphFileStore, LLMChatAgent
 from ..core.chunking import chunk_email_records
 
 
@@ -17,7 +20,9 @@ def start_new_chat(user_query: str) -> Tuple[UUID, str]:
 
     Returns the chat session UUID and the model response to the initial query.
     """
-    raise NotImplementedError("Advanced RAG start_new_chat service not implemented.")
+    chat_id = uuid4()
+    answer = graph_rag_query(chat_id, user_query)
+    return chat_id, answer
 
 
 def continue_chat(chat_id: UUID, user_query: str) -> str:
@@ -26,7 +31,7 @@ def continue_chat(chat_id: UUID, user_query: str) -> str:
 
     Returns the model-generated response tied to the provided chat_id.
     """
-    raise NotImplementedError("Advanced RAG continue_chat service not implemented.")
+    return graph_rag_query(chat_id, user_query)
 
 
 def embed_documents(filename: str, *, chunk_size: int, overlap: int) -> int:
@@ -81,10 +86,12 @@ def embed_documents(filename: str, *, chunk_size: int, overlap: int) -> int:
 
     with embeddings_path.open("w", encoding="utf-8") as handle:
         for chunk_id, vector in embeddings:
+            text = chunk_texts[chunk_ids.index(chunk_id)]
             payload = {
                 "chunk_id": chunk_id,
                 "source_file": chunk_sources.get(chunk_id, chunk_id.split("::")[0]),
                 "embedding": vector,
+                "text": text,
             }
             handle.write(json.dumps(payload, ensure_ascii=False))
             handle.write("\n")
@@ -99,4 +106,182 @@ def build_graph_rag_index(filename: str, *, chunk_size: int, overlap: int) -> No
 
 def graph_rag_query(chat_id: UUID, user_query: str) -> str:
     """Execute a Graph RAG retrieval + generation workflow."""
-    raise NotImplementedError("Graph RAG query flow not implemented yet.")
+    query_embedding = embed_user_query(user_query)
+    contexts = retrieve_relevant_chunks(query_embedding)
+    graph_facts = graph_context_query(user_query)
+    prompt = compose_query_prompt(
+        user_query,
+        contexts,
+        graph_facts=graph_facts,
+    )
+
+    agent = LLMChatAgent()
+    response = agent.chat(
+        chat_id=str(chat_id),
+        prompt=prompt,
+        metadata={
+            "mode": "graph_rag",
+            "context_chunks": len(contexts),
+            "graph_facts": len(graph_facts),
+        },
+    )
+    return response
+
+
+def embed_user_query(query: str) -> List[float]:
+    """Embed a user query for similarity search."""
+    generator = EmbeddingGenerator()
+    vectors = generator.generate_from_texts(
+        identifiers=["user-query"],
+        documents=[query],
+    )
+    if not vectors:
+        raise RuntimeError("Failed to embed user query.")
+    _, vector = vectors[0]
+    return vector
+
+
+def retrieve_relevant_chunks(
+    query_embedding: Sequence[float],
+    *,
+    top_k: int = 5,
+    embedding_path: Path | None = None,
+) -> List[Dict[str, str]]:
+    """
+    Retrieve the most similar chunks to the embedded query using cosine similarity.
+    """
+    path = embedding_path or Path("outputs/advanced_rag/embeddings/email_embeddings.jsonl")
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Embedding store not found at {path}. Run the embed step first."
+        )
+
+    query_vec = np.array(query_embedding, dtype=np.float32)
+    query_norm = np.linalg.norm(query_vec)
+    if query_norm == 0:
+        raise ValueError("Query embedding has zero norm; cannot compute similarity.")
+
+    results: List[Dict[str, str]] = []
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            payload = json.loads(line)
+            chunk_vec = np.array(payload["embedding"], dtype=np.float32)
+            denom = np.linalg.norm(chunk_vec) * query_norm
+            score = float(np.dot(query_vec, chunk_vec) / denom) if denom else 0.0
+            results.append(
+                {
+                    "chunk_id": payload["chunk_id"],
+                    "source_file": payload.get("source_file", ""),
+                    "text": payload.get("text", ""),
+                    "score": f"{score:.4f}",
+                }
+            )
+
+    results.sort(key=lambda item: float(item["score"]), reverse=True)
+    return results[:top_k]
+
+
+def compose_query_prompt(
+    user_query: str,
+    contexts: Sequence[Dict[str, str]],
+    *,
+    graph_facts: Sequence[Dict[str, str]] | None = None,
+) -> str:
+    """
+    Compose a model prompt that combines the user question with retrieved context.
+    """
+    if not contexts:
+        assembled = "No relevant context retrieved. Answer based on general knowledge."
+    else:
+        assembled = "\n\n".join(
+            f"Context #{idx}\nSource: {ctx.get('source_file', 'unknown')}\n"
+            f"Relevance: {ctx.get('score', '0.0')}\n{ctx.get('text', '').strip()}"
+            for idx, ctx in enumerate(contexts, start=1)
+        )
+
+    if graph_facts is None:
+        graph_facts = graph_context_query(user_query)
+
+    graph_section = ""
+    if graph_facts:
+        graph_section = "\n\nGraph Insights:\n" + "\n".join(
+            f"- {fact.get('summary', fact.get('entity', ''))}"
+            for fact in graph_facts
+        )
+
+    prompt = (
+        "You are an assistant that must answer questions using Enron email snippets.\n"
+        "Use only the context provided. If the context does not contain the answer, "
+        "state that you are unsure.\n\n"
+        f"Question: {user_query}\n\n"
+        f"Context:\n{assembled}"
+        f"{graph_section}\n\n"
+        "Answer:"
+    )
+    return prompt
+
+
+def graph_context_query(user_query: str) -> List[Dict[str, str]]:
+    """
+    Query the graph artifacts (nodes/edges) and surface entities related to the query.
+    """
+    store = GraphFileStore()
+    try:
+        nodes = store.query_graph_file("graph/nodes.jsonl")
+    except FileNotFoundError:
+        return []
+
+    if not isinstance(nodes, list):
+        return []
+
+    keywords = {token.lower() for token in re.findall(r"[A-Za-z0-9]{3,}", user_query)}
+    if not keywords:
+        return []
+
+    matches: List[Dict[str, str]] = []
+    for node in nodes:
+        label = str(node.get("label") or node.get("id") or "")
+        if not label:
+            continue
+        if not any(keyword in label.lower() for keyword in keywords):
+            continue
+        freq = node.get("frequency", 0)
+        matches.append(
+            {
+                "entity": label,
+                "summary": f"Entity '{label}' appears {freq} times in the email graph.",
+                "frequency": freq,
+            }
+        )
+
+    # Include relationships for matched entities when possible.
+    try:
+        edges = store.query_graph_file("graph/edges.jsonl")
+    except FileNotFoundError:
+        edges = []
+
+    if isinstance(edges, list):
+        for edge in edges:
+            source = str(edge.get("source") or "")
+            target = str(edge.get("target") or "")
+            if not source or not target:
+                continue
+            if not (
+                any(keyword in source.lower() for keyword in keywords)
+                or any(keyword in target.lower() for keyword in keywords)
+            ):
+                continue
+            weight = edge.get("weight", 1)
+            matches.append(
+                {
+                    "entity": f"{source} ↔ {target}",
+                    "summary": (
+                        f"Relationship between '{source}' and '{target}' "
+                        f"occurs {weight} times in the graph."
+                    ),
+                    "frequency": weight,
+                }
+            )
+
+    matches.sort(key=lambda item: item.get("frequency", 0), reverse=True)
+    return matches[:5]
