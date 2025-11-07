@@ -1,7 +1,8 @@
 #!/usr/bin/env sh
 set -eu
 
-MODEL="${OLLAMA_MODEL:-llama3.1:8b}"
+RAW_MODELS="${OLLAMA_MODELS:-${OLLAMA_MODEL:-llama3.2:1b}}"
+MODELS=${RAW_MODELS//,/ }
 HOST="${OLLAMA_HOST:-0.0.0.0}"
 PORT="${OLLAMA_PORT:-11434}"
 
@@ -9,7 +10,7 @@ export OLLAMA_HOST="${HOST}"
 export OLLAMA_PORT="${PORT}"
 
 warm_up() {
-  echo "Starting temporary Ollama server to warm up model ${MODEL}"
+  echo "Starting temporary Ollama server to warm up models: ${MODELS}"
   ollama serve >/tmp/ollama-warmup.log 2>&1 &
   SERVER_PID=$!
 
@@ -23,9 +24,11 @@ warm_up() {
   done
 
   if [ "$READY" -eq 1 ]; then
-    if ! ollama pull "${MODEL}" >/tmp/ollama-pull.log 2>&1; then
-      echo "Warning: failed to pull model ${MODEL}. Review /tmp/ollama-pull.log"
-    fi
+    for MODEL in $MODELS; do
+      if ! ollama pull "${MODEL}" >/tmp/ollama-pull.log 2>&1; then
+        echo "Warning: failed to pull model ${MODEL}. Review /tmp/ollama-pull.log"
+      fi
+    done
   else
     echo "Warning: Ollama warmup server did not become ready. Skipping pre-pull."
   fi

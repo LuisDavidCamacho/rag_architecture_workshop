@@ -25,30 +25,32 @@ router = APIRouter(prefix="/api", tags=["advanced-rag"])
 def start_chat(payload: QueryRequest) -> QueryResponse:
     """Start a brand-new chat session with the Advanced RAG model."""
     try:
-        chat_id, response = rag_services.start_new_chat(payload.query)
-    except NotImplementedError as exc:
-        logger.info("start_new_chat not implemented: %s", exc)
-        raise HTTPException(
-            status_code=501,
-            detail="Advanced RAG start chat service not implemented yet.",
-        ) from exc
+        response = rag_services.answer_question(payload.query)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        logger.exception("Error executing advanced RAG workflow")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    return QueryResponse(chat_id=chat_id, response=response)
+    return QueryResponse(chat_id=response.chat_id, response=response.answer)
 
 
 @router.post("/query/{chat_id}", response_model=QueryResponse)
 def continue_existing_chat(chat_id: UUID, payload: QueryRequest) -> QueryResponse:
     """Continue an existing chat session using the provided chat_id."""
     try:
-        response = rag_services.continue_chat(chat_id=chat_id, user_query=payload.query)
-    except NotImplementedError as exc:
-        logger.info("continue_chat not implemented: %s", exc)
-        raise HTTPException(
-            status_code=501,
-            detail="Advanced RAG continue chat service not implemented yet.",
-        ) from exc
+        response = rag_services.answer_question(payload.query, chat_id=chat_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        logger.exception("Error executing advanced RAG workflow")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    return QueryResponse(chat_id=chat_id, response=response)
+    return QueryResponse(chat_id=response.chat_id, response=response.answer)
 
 
 @router.post("/embed", response_model=EmbedResponse)

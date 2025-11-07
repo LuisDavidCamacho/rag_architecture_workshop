@@ -22,14 +22,14 @@ class EmbeddingGenerator:
 
     def __init__(
         self,
-        model_name: str = "llama3.1:8b",
+        model_name: Optional[str] = None,
         *,
         id_column: str = "id",
         text_column: str = "text",
         embedder: Optional[Embeddings] = None,
         base_url: Optional[str] = None,
     ) -> None:
-        self.model_name = model_name
+        self.model_name = model_name or os.getenv("OLLAMA_EMBED_MODEL", "llama3.2:1b")
         self.id_column = id_column
         self.text_column = text_column
         self._embedder: Optional[Embeddings] = embedder

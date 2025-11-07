@@ -3,30 +3,43 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Tuple
-from uuid import UUID
+from typing import Dict, List, Sequence, Tuple
+from uuid import UUID, uuid4
 
-from ..core import EmbeddingGenerator
+import numpy as np
+
+from ..core import EmbeddingGenerator, LLMChatAgent
 from ..core.chunking import chunk_email_records
 
 
-def start_new_chat(user_query: str) -> Tuple[UUID, str]:
-    """
-    Initialize a new conversational session for the Advanced RAG workflow.
-
-    Returns the chat session UUID and the model response to the initial query.
-    """
-    raise NotImplementedError("Advanced RAG start_new_chat service not implemented.")
+@dataclass
+class RagAnswer:
+    chat_id: UUID
+    answer: str
 
 
-def continue_chat(chat_id: UUID, user_query: str) -> str:
+def answer_question(user_query: str, chat_id: UUID | None = None) -> RagAnswer:
     """
-    Continue an existing chat session by appending a new user query.
+    Run the full retrieval + prompting workflow and return model-ready prompt.
+    """
+    query_embedding = embed_user_query(user_query)
+    contexts = retrieve_relevant_chunks(query_embedding)
+    prompt = compose_query_prompt(user_query, contexts)
+    chat_identifier = chat_id or uuid4()
 
-    Returns the model-generated response tied to the provided chat_id.
-    """
-    raise NotImplementedError("Advanced RAG continue_chat service not implemented.")
+    agent = LLMChatAgent()
+    response_text = agent.chat(
+        chat_id=str(chat_identifier),
+        prompt=prompt,
+        metadata={
+            "mode": "advanced_rag",
+            "context_chunks": len(contexts),
+        },
+    )
+
+    return RagAnswer(chat_id=str(chat_identifier), answer=response_text)
 
 
 def embed_documents(filename: str, *, chunk_size: int, overlap: int) -> int:
@@ -85,8 +98,91 @@ def embed_documents(filename: str, *, chunk_size: int, overlap: int) -> int:
                 "chunk_id": chunk_id,
                 "source_file": chunk_sources.get(chunk_id, chunk_id.split("::")[0]),
                 "embedding": vector,
+                "text": chunk_texts[chunk_ids.index(chunk_id)],
             }
             handle.write(json.dumps(payload, ensure_ascii=False))
             handle.write("\n")
 
     return len(embeddings)
+
+
+def embed_user_query(query: str) -> List[float]:
+    """
+    Embed a user query so it can be compared against stored document vectors.
+    """
+    generator = EmbeddingGenerator(model_name="llama3.1:8b")
+    embeddings = generator.generate_from_texts(
+        identifiers=["user-query"],
+        documents=[query],
+    )
+    if not embeddings:
+        raise RuntimeError("Failed to embed user query.")
+    _, vector = embeddings[0]
+    return vector
+
+
+def retrieve_relevant_chunks(
+    query_embedding: Sequence[float],
+    *,
+    top_k: int = 5,
+    embedding_path: Path | None = None,
+) -> List[Dict[str, str]]:
+    """
+    Retrieve the top-k chunks most similar to the embedded query using cosine similarity.
+    """
+    path = embedding_path or Path("outputs/advanced_rag/embeddings/email_embeddings.jsonl")
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Embedding store not found at {path}. Run the embed stage first."
+        )
+
+    query_vec = np.array(query_embedding, dtype=np.float32)
+    query_norm = np.linalg.norm(query_vec)
+    if query_norm == 0:
+        raise ValueError("Query embedding has zero norm; cannot compute similarity.")
+
+    candidates: List[Dict[str, str]] = []
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            payload = json.loads(line)
+            chunk_vec = np.array(payload["embedding"], dtype=np.float32)
+            denom = np.linalg.norm(chunk_vec) * query_norm
+            score = float(np.dot(query_vec, chunk_vec) / denom) if denom else 0.0
+            candidates.append(
+                {
+                    "chunk_id": payload["chunk_id"],
+                    "source_file": payload.get("source_file", ""),
+                    "text": payload.get("text", ""),
+                    "score": f"{score:.4f}",
+                }
+            )
+
+    candidates.sort(key=lambda item: float(item["score"]), reverse=True)
+    return candidates[:top_k]
+
+
+def compose_query_prompt(user_query: str, contexts: Sequence[Dict[str, str]]) -> str:
+    """
+    Compose the final prompt that will be sent to the model combining user query and retrieved snippets.
+    """
+    context_blocks = []
+    for idx, context in enumerate(contexts, start=1):
+        block = (
+            f"Context #{idx}\n"
+            f"Source: {context.get('source_file', 'unknown')}\n"
+            f"Relevance: {context.get('score', '0.0')}\n"
+            f"{context.get('text', '').strip()}"
+        )
+        context_blocks.append(block.strip())
+
+    assembled_context = "\n\n".join(context_blocks) or "No relevant context retrieved."
+
+    prompt = (
+        "You are a helpful assistant with access to Enron email snippets.\n"
+        "Answer the question using ONLY the provided context. If the context is insufficient, "
+        "state that you are unsure.\n\n"
+        f"Question: {user_query}\n\n"
+        f"Context:\n{assembled_context}\n\n"
+        "Final Answer:"
+    )
+    return prompt

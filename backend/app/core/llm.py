@@ -34,7 +34,11 @@ class LLMChatAgent:
         timeout: Optional[float] = None,
         conversation_store: Optional[ConversationStore] = None,
     ) -> None:
-        resolved_model = model_name or os.getenv("OLLAMA_MODEL", "llama3.1:8b")
+        resolved_model = (
+            model_name
+            or os.getenv("OLLAMA_CHAT_MODEL")
+            or os.getenv("OLLAMA_MODEL", "qwen2:4b")
+        )
         resolved_base_url = base_url or os.getenv(
             "OLLAMA_BASE_URL",
             _default_ollama_url(),
