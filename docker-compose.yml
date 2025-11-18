@@ -7,7 +7,7 @@ services:
     environment:
       - PYTHONPATH=/app/backend
       - OLLAMA_BASE_URL=http://ollama:11434
-      - OLLAMA_MODEL=qwen2:4b
+      - OLLAMA_CHAT_MODEL=qwen2:4b
       - OLLAMA_EMBED_MODEL=llama3.2:1b
     volumes:
       - ./backend:/app/backend:ro

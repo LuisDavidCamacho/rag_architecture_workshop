@@ -76,7 +76,7 @@ def embed_documents(filename: str, *, chunk_size: int, overlap: int) -> int:
     if not chunk_ids:
         return 0
 
-    embedding_generator = EmbeddingGenerator(model_name="llama3.1:8b")
+    embedding_generator = EmbeddingGenerator()
     embeddings = embedding_generator.generate_from_texts(chunk_ids, chunk_texts)
 
     # Persist embeddings for downstream retrieval challenges.
