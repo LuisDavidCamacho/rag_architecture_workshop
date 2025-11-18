@@ -78,6 +78,21 @@ def embed_documents(
             f"Found {set(dataframe.columns)} instead."
         )
 
+    output_dir = Path("outputs/advanced_rag/embeddings")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    embeddings_path = output_dir / "email_embeddings.jsonl"
+
+    if embeddings_path.exists():
+        print("*" * 20)
+        print(
+            f"Existing embeddings found at {embeddings_path}. "
+            "Loading cached vectors instead of regenerating."
+        )
+        print("*" * 20)
+        with embeddings_path.open("r", encoding="utf-8") as handle:
+            cached_count = sum(1 for _ in handle)
+        return cached_count
+
     total_rows = dataframe.height
     if total_rows == 0:
         return 0
@@ -114,10 +129,6 @@ def embed_documents(
     print("*" * 20)
     print("generating embeddings")
     print("*" * 20)
-
-    output_dir = Path("outputs/advanced_rag/embeddings")
-    output_dir.mkdir(parents=True, exist_ok=True)
-    embeddings_path = output_dir / "email_embeddings.jsonl"
 
     embedded_count = 0
     batch: List[Tuple[str, str, str]] = []
