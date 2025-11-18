@@ -2,7 +2,7 @@
 set -eu
 
 RAW_MODELS="${OLLAMA_MODELS:-${OLLAMA_MODEL:-llama3.2:1b}}"
-MODELS=${RAW_MODELS//,/ }
+MODELS=$(echo "${RAW_MODELS}" | tr ',' ' ')
 HOST="${OLLAMA_HOST:-0.0.0.0}"
 PORT="${OLLAMA_PORT:-11434}"
 

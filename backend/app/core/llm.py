@@ -37,7 +37,7 @@ class LLMChatAgent:
         resolved_model = (
             model_name
             or os.getenv("OLLAMA_CHAT_MODEL")
-            or os.getenv("OLLAMA_MODEL", "qwen2:4b")
+            or os.getenv("OLLAMA_MODEL", "llama3.2:1b")
         )
         resolved_base_url = base_url or os.getenv(
             "OLLAMA_BASE_URL",

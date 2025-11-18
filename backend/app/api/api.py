@@ -63,8 +63,9 @@ def embed_corpus(
     try:
         embedded_count = rag_services.embed_documents(
             filename=safe_name,
-            chunk_size=payload.chunk_size or 512,
-            overlap=payload.overlap or 50,
+            chunk_size=payload.chunk_size or 2048,
+            overlap=payload.overlap or 138,
+            batch_size=payload.batch_size or 128,
         )
     except FileNotFoundError as exc:
         logger.warning("embed_documents file error: %s", exc)

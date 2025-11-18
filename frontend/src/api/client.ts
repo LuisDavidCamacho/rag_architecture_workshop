@@ -53,11 +53,12 @@ export function continueChat(
 
 export function embedDocuments(
   filename: string,
-  options?: { chunkSize?: number; overlap?: number }
+  options?: { chunkSize?: number; overlap?: number; batchSize?: number }
 ): Promise<EmbedResponse> {
   return request<EmbedResponse>("/embed", {
     filename,
     chunk_size: options?.chunkSize,
-    overlap: options?.overlap
+    overlap: options?.overlap,
+    batch_size: options?.batchSize
   });
 }

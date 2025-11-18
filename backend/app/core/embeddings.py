@@ -5,10 +5,9 @@ from __future__ import annotations
 import os
 from typing import Iterable, List, Optional, Tuple, TYPE_CHECKING
 
-from langchain_core.embeddings import Embeddings
-
 if TYPE_CHECKING:
     import polars as pl
+    from fastembed import TextEmbedding
 
 
 class EmbeddingGenerator:
@@ -16,7 +15,7 @@ class EmbeddingGenerator:
     Abstraction over the embedding model interface.
 
     The workshop will extend this class to call a concrete embedding model (e.g.,
-    via Ollama or a Hugging Face pipeline) and convert results into vectors ready
+    via FastEmbed or a Hugging Face pipeline) and convert results into vectors ready
     for persistence.
     """
 
@@ -26,14 +25,26 @@ class EmbeddingGenerator:
         *,
         id_column: str = "id",
         text_column: str = "text",
-        embedder: Optional[Embeddings] = None,
-        base_url: Optional[str] = None,
+        embedder: Optional["TextEmbedding"] = None,
+        batch_size: int = 128,
     ) -> None:
-        self.model_name = model_name or os.getenv("OLLAMA_EMBED_MODEL", "llama3.2:1b")
+        self.model_name = model_name or os.getenv(
+            "FASTEMBED_MODEL", "BAAI/bge-small-en-v1.5"
+        )
         self.id_column = id_column
         self.text_column = text_column
-        self._embedder: Optional[Embeddings] = embedder
-        self._base_url = base_url or os.getenv("OLLAMA_BASE_URL")
+        env_batch_size = os.getenv("FASTEMBED_BATCH_SIZE")
+        if env_batch_size:
+            try:
+                batch_size = int(env_batch_size)
+            except ValueError:
+                raise ValueError("FASTEMBED_BATCH_SIZE must be an integer.") from None
+
+        if batch_size <= 0:
+            raise ValueError("batch_size must be a positive integer.")
+
+        self.batch_size = batch_size
+        self._embedder: Optional["TextEmbedding"] = embedder
 
     def generate(self, dataframe: "pl.DataFrame") -> List[Tuple[str, List[float]]]:
         """
@@ -72,23 +83,7 @@ class EmbeddingGenerator:
         if not documents:
             return []
 
-        if self._embedder is None:
-            try:
-                from langchain_ollama import OllamaEmbeddings
-            except ImportError as exc:  # pragma: no cover
-                raise RuntimeError(
-                    "langchain-ollama is not installed. Add it via Poetry to generate "
-                    "embeddings using Ollama."
-                ) from exc
-
-            print(self.ollama_base_url)
-
-            self._embedder = OllamaEmbeddings(
-                model=self.model_name,
-                base_url=self._base_url,
-            )
-
-        embeddings = self._embedder.embed_documents(documents)
+        embeddings = self._embed_documents(documents)
 
         if len(embeddings) != len(identifiers):
             raise RuntimeError(
@@ -114,21 +109,50 @@ class EmbeddingGenerator:
         if len(ids) != len(docs):
             raise ValueError("Identifiers and documents must have the same length.")
 
-        if self._embedder is None:
-            try:
-                from langchain_ollama import OllamaEmbeddings
-            except ImportError as exc:  # pragma: no cover
-                raise RuntimeError(
-                    "langchain-ollama is not installed. Add it via Poetry to generate embeddings."
-                ) from exc
-
-            self._embedder = OllamaEmbeddings(
-                model=self.model_name,
-                base_url=self._base_url,
-            )
-
-        embeddings = self._embedder.embed_documents(docs)
+        print("*" * 20)
+        print("generating embeddings in embedding generator")
+        print("ids length:", len(docs))
+        print("*" * 20)
+        embeddings = self._embed_documents(docs)
         if len(embeddings) != len(ids):
             raise RuntimeError("Embedding model returned unexpected number of vectors.")
+        print("*" * 20)
+        print("embedding generation complete")
+        print("returning embeddings")
+        print("*" * 20)
+        return list(zip(ids, embeddings, strict=True))
 
-        return list(zip(ids, embeddings))
+    def embed_batch(self, documents: List[str]) -> List[List[float]]:
+        """Embed a batch of documents without extra bookkeeping."""
+        if not documents:
+            return []
+        return self._embed_documents(documents)
+
+    def _ensure_embedder(self) -> "TextEmbedding":
+        if self._embedder is None:
+            try:
+                from fastembed import TextEmbedding
+            except ImportError as exc:  # pragma: no cover
+                raise RuntimeError(
+                    "FastEmbed is not installed. Add the 'fastembed' package via Poetry."
+                ) from exc
+
+            self._embedder = TextEmbedding(model_name=self.model_name)
+        return self._embedder
+
+    def _embed_documents(self, docs: List[str]) -> List[List[float]]:
+        embedder = self._ensure_embedder()
+
+        embeddings: List[List[float]] = []
+        for batch in _batched(docs, self.batch_size):
+            if not batch:
+                continue
+            for vector in embedder.embed(batch, batch_size=self.batch_size):
+                embeddings.append(vector.tolist())
+
+        return embeddings
+
+
+def _batched(items: List[str], batch_size: int) -> Iterable[List[str]]:
+    for start in range(0, len(items), batch_size):
+        yield items[start : start + batch_size]

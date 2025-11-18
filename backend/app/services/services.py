@@ -5,13 +5,14 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from time import perf_counter
 from typing import Dict, List, Sequence, Tuple
 from uuid import UUID, uuid4
 
 import numpy as np
 
 from ..core import EmbeddingGenerator, LLMChatAgent
-from ..core.chunking import chunk_email_records
+from ..core.chunking import iter_chunk_email_records
 
 
 @dataclass
@@ -42,7 +43,13 @@ def answer_question(user_query: str, chat_id: UUID | None = None) -> RagAnswer:
     return RagAnswer(chat_id=str(chat_identifier), answer=response_text)
 
 
-def embed_documents(filename: str, *, chunk_size: int, overlap: int) -> int:
+def embed_documents(
+    filename: str,
+    *,
+    chunk_size: int,
+    overlap: int,
+    batch_size: int,
+) -> int:
     """
     Generate embeddings for the specified CSV corpus located under data/corpus.
 
@@ -71,46 +78,98 @@ def embed_documents(filename: str, *, chunk_size: int, overlap: int) -> int:
             f"Found {set(dataframe.columns)} instead."
         )
 
+    total_rows = dataframe.height
+    if total_rows == 0:
+        return 0
+
+    sample_fraction = 0.01
+    sample_seed = 42
+    sample_n = max(1, int(total_rows * sample_fraction))
+    print("*" * 20)
+    print(
+        f"sampling {sample_n} / {total_rows} rows (~{sample_fraction:.0%}) "
+        f"from {filename} with seed {sample_seed}"
+    )
+    print("*" * 20)
+    dataframe = dataframe.sample(
+        n=sample_n,
+        seed=sample_seed,
+        with_replacement=False,
+    )
+
     records = (
         (row["file"], row["message"])
         for row in dataframe.iter_rows(named=True)
     )
-    chunk_ids, chunk_texts, chunk_sources = chunk_email_records(
+    chunk_records = iter_chunk_email_records(
         records,
         chunk_size=chunk_size,
         overlap=overlap,
     )
 
-    if not chunk_ids:
-        return 0
+    print("*" * 20)
+    print("loading embedding model")
+    print("*" * 20)
+    embedding_generator = EmbeddingGenerator(batch_size=batch_size)
+    print("*" * 20)
+    print("generating embeddings")
+    print("*" * 20)
 
-    embedding_generator = EmbeddingGenerator(model_name="llama3.1:8b")
-    embeddings = embedding_generator.generate_from_texts(chunk_ids, chunk_texts)
-
-    # Persist embeddings for downstream retrieval challenges.
     output_dir = Path("outputs/advanced_rag/embeddings")
     output_dir.mkdir(parents=True, exist_ok=True)
     embeddings_path = output_dir / "email_embeddings.jsonl"
 
-    with embeddings_path.open("w", encoding="utf-8") as handle:
-        for chunk_id, vector in embeddings:
+    embedded_count = 0
+    batch: List[Tuple[str, str, str]] = []
+    start_time = perf_counter()
+
+    def flush_batch(handle) -> None:
+        nonlocal batch, embedded_count
+        if not batch:
+            return
+        batch_ids = [record[0] for record in batch]
+        batch_texts = [record[1] for record in batch]
+        embeddings = embedding_generator.embed_batch(batch_texts)
+        if len(embeddings) != len(batch):
+            raise RuntimeError("Embedding batch mismatch.")
+
+        for (chunk_id, text, source_file), vector in zip(
+            batch, embeddings, strict=True
+        ):
             payload = {
                 "chunk_id": chunk_id,
-                "source_file": chunk_sources.get(chunk_id, chunk_id.split("::")[0]),
+                "source_file": source_file,
                 "embedding": vector,
-                "text": chunk_texts[chunk_ids.index(chunk_id)],
+                "text": text,
             }
             handle.write(json.dumps(payload, ensure_ascii=False))
             handle.write("\n")
+            embedded_count += 1
 
-    return len(embeddings)
+        batch.clear()
+
+    with embeddings_path.open("w", encoding="utf-8") as handle:
+        for chunk_record in chunk_records:
+            batch.append(chunk_record)
+            if len(batch) >= embedding_generator.batch_size:
+                flush_batch(handle)
+        flush_batch(handle)
+
+    elapsed = perf_counter() - start_time
+    if embedded_count:
+        print(
+            f"Embedded {embedded_count} chunks to {embeddings_path} "
+            f"in {elapsed:.2f}s (~{embedded_count / max(elapsed, 1e-6):.1f} chunks/s)."
+        )
+
+    return embedded_count
 
 
 def embed_user_query(query: str) -> List[float]:
     """
     Embed a user query so it can be compared against stored document vectors.
     """
-    generator = EmbeddingGenerator(model_name="llama3.1:8b")
+    generator = EmbeddingGenerator()
     embeddings = generator.generate_from_texts(
         identifiers=["user-query"],
         documents=[query],

@@ -27,12 +27,16 @@ class EmbedRequest(BaseModel):
         description="CSV file located under data/corpus to ingest (default: emails.csv).",
     )
     chunk_size: Optional[int] = Field(
-        default=512,
+        default=2048,
         description="Preferred chunk size used during preprocessing.",
     )
     overlap: Optional[int] = Field(
-        default=50,
+        default=138,
         description="Token overlap between chunks.",
+    )
+    batch_size: Optional[int] = Field(
+        default=128,
+        description="Batch size used by the embedding model.",
     )
 
 
