@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, Iterable, List, Tuple
+from typing import Dict, Iterable, Iterator, List, Tuple
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -62,10 +62,25 @@ def chunk_email_records(
     records: Iterable[tuple[str, str]], *, chunk_size: int, overlap: int
 ) -> Tuple[List[str], List[str], Dict[str, str]]:
     """Chunk (file, message) pairs into overlapping snippets."""
-    chunker = DocumentChunker(chunk_size=chunk_size, overlap=overlap)
     chunk_ids: List[str] = []
     chunk_texts: List[str] = []
     chunk_sources: Dict[str, str] = {}
+
+    for chunk_id, chunk_text, source in iter_chunk_email_records(
+        records, chunk_size=chunk_size, overlap=overlap
+    ):
+        chunk_ids.append(chunk_id)
+        chunk_texts.append(chunk_text)
+        chunk_sources[chunk_id] = source
+
+    return chunk_ids, chunk_texts, chunk_sources
+
+
+def iter_chunk_email_records(
+    records: Iterable[tuple[str, str]], *, chunk_size: int, overlap: int
+) -> Iterator[Tuple[str, str, str]]:
+    """Yield chunk tuples without materialising the entire dataset."""
+    chunker = DocumentChunker(chunk_size=chunk_size, overlap=overlap)
 
     for source_file, message in records:
         text = (message or "").strip()
@@ -74,8 +89,4 @@ def chunk_email_records(
         chunks = chunker.chunk([text])
         for index, chunk in enumerate(chunks):
             chunk_id = f"{source_file}::chunk-{index}"
-            chunk_ids.append(chunk_id)
-            chunk_texts.append(chunk)
-            chunk_sources[chunk_id] = source_file
-
-    return chunk_ids, chunk_texts, chunk_sources
+            yield chunk_id, chunk, source_file

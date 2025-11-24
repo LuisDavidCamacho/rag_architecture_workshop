@@ -5,13 +5,14 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from time import perf_counter
 from typing import Dict, List, Sequence, Tuple
 from uuid import UUID, uuid4
 
 import numpy as np
 
 from ..core import EmbeddingGenerator, GraphFileStore, LLMChatAgent
-from ..core.chunking import chunk_email_records
+from ..core.chunking import iter_chunk_email_records
 
 
 def start_new_chat(user_query: str) -> Tuple[UUID, str]:
@@ -34,7 +35,13 @@ def continue_chat(chat_id: UUID, user_query: str) -> str:
     return graph_rag_query(chat_id, user_query)
 
 
-def embed_documents(filename: str, *, chunk_size: int, overlap: int) -> int:
+def embed_documents(
+    filename: str,
+    *,
+    chunk_size: int,
+    overlap: int,
+    batch_size: int,
+) -> int:
     """
     Generate embeddings for the specified CSV corpus located under data/corpus.
 
@@ -55,6 +62,21 @@ def embed_documents(filename: str, *, chunk_size: int, overlap: int) -> int:
             f"Corpus file '{safe_name}' was not found in data/corpus (looked for {corpus_path})."
         )
 
+    output_dir = Path("outputs/advanced_rag/embeddings")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    embeddings_path = output_dir / "email_embeddings.jsonl"
+
+    if embeddings_path.exists():
+        print("*" * 20)
+        print(
+            f"Existing embeddings found at {embeddings_path}. "
+            "Loading cached vectors instead of regenerating."
+        )
+        print("*" * 20)
+        with embeddings_path.open("r", encoding="utf-8") as handle:
+            cached_count = sum(1 for _ in handle)
+        return cached_count
+
     dataframe = pl.read_csv(corpus_path)
     expected_columns = {"file", "message"}
     if not expected_columns.issubset(dataframe.columns):
@@ -67,36 +89,57 @@ def embed_documents(filename: str, *, chunk_size: int, overlap: int) -> int:
         (row["file"], row["message"])
         for row in dataframe.iter_rows(named=True)
     )
-    chunk_ids, chunk_texts, chunk_sources = chunk_email_records(
+    chunk_records = iter_chunk_email_records(
         records,
         chunk_size=chunk_size,
         overlap=overlap,
     )
 
-    if not chunk_ids:
-        return 0
+    embedding_generator = EmbeddingGenerator(batch_size=batch_size)
 
-    embedding_generator = EmbeddingGenerator()
-    embeddings = embedding_generator.generate_from_texts(chunk_ids, chunk_texts)
+    embedded_count = 0
+    batch: List[Tuple[str, str, str]] = []
+    start_time = perf_counter()
 
-    # Persist embeddings for downstream retrieval challenges.
-    output_dir = Path("outputs/advanced_rag/embeddings")
-    output_dir.mkdir(parents=True, exist_ok=True)
-    embeddings_path = output_dir / "email_embeddings.jsonl"
+    def flush_batch(handle) -> None:
+        nonlocal batch, embedded_count
+        if not batch:
+            return
+        texts = [item[1] for item in batch]
+        embeddings = embedding_generator.embed_batch(texts)
+        if len(embeddings) != len(batch):
+            raise RuntimeError("Embedding batch mismatch.")
 
-    with embeddings_path.open("w", encoding="utf-8") as handle:
-        for chunk_id, vector in embeddings:
-            text = chunk_texts[chunk_ids.index(chunk_id)]
+        for (chunk_id, text, source_file), vector in zip(
+            batch, embeddings, strict=True
+        ):
             payload = {
                 "chunk_id": chunk_id,
-                "source_file": chunk_sources.get(chunk_id, chunk_id.split("::")[0]),
+                "source_file": source_file,
                 "embedding": vector,
                 "text": text,
             }
             handle.write(json.dumps(payload, ensure_ascii=False))
             handle.write("\n")
+            embedded_count += 1
 
-    return len(embeddings)
+        batch.clear()
+
+    with embeddings_path.open("w", encoding="utf-8") as handle:
+        for record in chunk_records:
+            batch.append(record)
+            if len(batch) >= embedding_generator.batch_size:
+                flush_batch(handle)
+        flush_batch(handle)
+
+    elapsed = perf_counter() - start_time
+    if embedded_count:
+        print(
+            f"Embedded {embedded_count} chunks to {embeddings_path} "
+            f"in {elapsed:.2f}s (~{embedded_count / max(elapsed, 1e-6):.1f} chunks/s)."
+        )
+
+    return embedded_count
 
 
 def build_graph_rag_index(filename: str, *, chunk_size: int, overlap: int) -> None:

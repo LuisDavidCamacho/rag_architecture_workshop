@@ -7,8 +7,9 @@ services:
     environment:
       - PYTHONPATH=/app/backend
       - OLLAMA_BASE_URL=http://ollama:11434
-      - OLLAMA_CHAT_MODEL=qwen2:4b
-      - OLLAMA_EMBED_MODEL=llama3.2:1b
+      - OLLAMA_CHAT_MODEL=llama3.2:1b
+      - FASTEMBED_MODEL=BAAI/bge-small-en-v1.5
+      - FASTEMBED_BATCH_SIZE=256
     volumes:
       - ./backend:/app/backend:ro
       - ./data:/app/data:ro
@@ -36,8 +37,8 @@ services:
       dockerfile: infra/docker/ollama/Dockerfile
     restart: unless-stopped
     environment:
-      - OLLAMA_MODEL=qwen2:4b
-      - OLLAMA_MODELS=qwen2:4b,llama3.2:1b
+      - OLLAMA_MODEL=llama3.2:1b
+      - OLLAMA_MODELS=llama3.2:1b
     volumes:
       - ollama-models:/root/.ollama
     ports:

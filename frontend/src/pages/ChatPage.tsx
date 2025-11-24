@@ -116,7 +116,11 @@ export function ChatPage(): React.ReactElement {
     setEmbeddingState({ status: "loading", filename: datasetName });
 
     try {
-      const response = await embedDocuments(datasetName);
+      const response = await embedDocuments(datasetName, {
+        chunkSize: 2048,
+        overlap: 128,
+        batchSize: 256
+      });
 
       setEmbeddingState({
         status: "success",

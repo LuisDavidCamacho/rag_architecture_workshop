@@ -1,6 +1,6 @@
 """Core application utilities and abstractions."""
 
-from .chunking import DocumentChunker, chunk_email_records
+from .chunking import DocumentChunker, chunk_email_records, iter_chunk_email_records
 from .database import FaissVectorStore, GraphFileStore
 from .embeddings import EmbeddingGenerator
 from .history import ConversationStore, StoredMessage
@@ -15,4 +15,5 @@ __all__ = [
     "ConversationStore",
     "StoredMessage",
     "chunk_email_records",
+    "iter_chunk_email_records",
 ]
